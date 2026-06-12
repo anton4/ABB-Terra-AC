@@ -130,6 +130,8 @@ This integration currently supports the following user-configurable parameters t
 
 **Options** (under the integration’s **Configure** menu): **polling interval** (`scan_interval`) from 5 to 300 seconds. This does not change the charger IP or port.
 
+The polling interval must stay below the charger's Modbus **communication timeout** (default 60 seconds, adjustable via the Communication Timeout entity). The charger treats a longer silence as lost communication and may stop the session or drop to the fallback limit, so the options flow rejects intervals that are not shorter than the timeout currently configured on the charger. ABB recommends polling every 30–90 seconds.
+
 If the charger IP address, hostname, or port changes, use the integration **reconfigure** flow to update the existing config entry without deleting it.
 Remove and re-add the integration only if reconfiguration does not solve the problem.
 
@@ -154,7 +156,8 @@ If the charger becomes unreachable, entities become unavailable. When communicat
 
 Known implementation details:
 
-- Charging state is derived from register `400Dh` high byte because the documented `400Ch` does not return a usable value on tested chargers.
+- Charging state is decoded from byte 1 of the 32-bit `400Ch` value (the high byte of its low word), as described in the ABB Modbus manual; bit 7 of the same byte is the "charging at reduced current" flag.
+- The error code register is decoded as a bitmask: the sensor state shows the first active error and the full list is available in the `active_errors` attribute.
 - The integration contains a one-time recovery workaround for known charger firmware issues where fallback limit or charging current limit may reset to an invalid value after an unexpected reboot.
 
 ## Removal

@@ -46,9 +46,12 @@
           "scan_interval": "Polling interval"
         },
         "data_description": {
-          "scan_interval": "How often Home Assistant reads charger registers, in seconds (5–300)."
+          "scan_interval": "How often Home Assistant reads charger registers, in seconds (5–300). Must be shorter than the charger's Modbus communication timeout (currently {communication_timeout} s) or the charger will treat the connection as lost."
         }
       }
+    },
+    "error": {
+      "scan_interval_exceeds_timeout": "The polling interval must be shorter than the charger's Modbus communication timeout ({communication_timeout} s). A slower poll makes the charger flag lost communication and stop or limit charging."
     }
   },
   "entity": {
@@ -140,6 +143,9 @@
       },
       "actual_current_limit": {
         "name": "Actual Current Limit"
+      },
+      "user_settable_max_current": {
+        "name": "User Settable Max Current"
       }
     },
     "switch": {
@@ -159,6 +165,9 @@
     "binary_sensor": {
       "is_charging": {
         "name": "Is Charging"
+      },
+      "charging_at_reduced_current": {
+        "name": "Charging at Reduced Current"
       }
     },
     "number": {
@@ -168,6 +177,9 @@
       },
       "fallback_limit": {
         "name": "Fallback Limit"
+      },
+      "communication_timeout": {
+        "name": "Communication Timeout"
       }
     }
   },

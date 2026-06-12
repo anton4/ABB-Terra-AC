@@ -281,3 +281,70 @@ async def test_coordinator_reconnects_and_retries_read_once(
     assert updated_data["fallback_limit"] == 0
     assert mock_client.connect.await_count >= 2
     assert mock_client.close.call_count >= 1
+
+
+async def test_fallback_restore_not_fooled_by_glitched_user_max(
+    hass: HomeAssistant,
+) -> None:
+    """A glitched user max (255 A) must not legitimize a 255 A fallback limit."""
+    entry = MockConfigEntry(**mock_config_entry_kwargs())
+    entry.add_to_hass(hass)
+
+    good_registers = make_holding_registers_37(user_max_amps=16, fallback_limit=10)
+    glitched_registers = make_holding_registers_37(
+        user_max_amps=255,
+        fallback_limit=255,
+        socket_lock_raw_32=257,  # cable + EV connected → restore write, not mask-only
+    )
+
+    mock_client = create_mock_modbus_client(
+        connect=True, read_error=False, registers=good_registers
+    )
+    with patch(_INIT_MODBUS, return_value=mock_client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data.coordinator
+    mock_client.read_holding_registers.side_effect = [
+        _read_result_with_registers(glitched_registers),
+    ]
+    updated = await coordinator._async_update_data()
+
+    assert updated["fallback_limit"] == 10
+    writes = [
+        (c.kwargs.get("address", c.args[0] if c.args else None),
+         c.kwargs.get("value", c.args[1] if len(c.args) > 1 else None))
+        for c in mock_client.write_register.await_args_list
+    ]
+    assert (16649, 10) in writes
+
+
+async def test_fallback_255_masked_without_write_when_unplugged(
+    hass: HomeAssistant,
+) -> None:
+    """Spurious 255 A reading while unplugged is masked without writing to the charger."""
+    entry = MockConfigEntry(**mock_config_entry_kwargs())
+    entry.add_to_hass(hass)
+
+    good_registers = make_holding_registers_37(user_max_amps=16, fallback_limit=10)
+    spurious_registers = make_holding_registers_37(
+        user_max_amps=16,
+        fallback_limit=255,
+        socket_lock_raw_32=0,
+    )
+
+    mock_client = create_mock_modbus_client(
+        connect=True, read_error=False, registers=good_registers
+    )
+    with patch(_INIT_MODBUS, return_value=mock_client):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data.coordinator
+    mock_client.read_holding_registers.side_effect = [
+        _read_result_with_registers(spurious_registers),
+    ]
+    updated = await coordinator._async_update_data()
+
+    assert updated["fallback_limit"] == 10
+    assert mock_client.write_register.await_count == 0

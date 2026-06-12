@@ -205,7 +205,13 @@ class AbbTerraAcFirmwareSensor(AbbTerraAcBaseSensor):
 
 
 class AbbTerraAcErrorCodeSensor(AbbTerraAcBaseSensor):
-    """Sensor for error code."""
+    """Sensor for error code.
+
+    The register is a bitmask: several errors can be active at once. The state
+    shows the lowest active error bit (the order they are listed in the ABB
+    manual); the full set is exposed via the ``active_errors`` attribute.
+    """
+
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -218,12 +224,40 @@ class AbbTerraAcErrorCodeSensor(AbbTerraAcBaseSensor):
         opts = list(dict.fromkeys([*ERROR_CODES.values(), "unknown"]))
         self._attr_options = opts
 
+    def _active_errors(self) -> list[str]:
+        """Translation keys of all error bits set in the current code."""
+        error_code = self.coordinator.data.get("error_code")
+        if not error_code:
+            return []
+        code = int(error_code)
+        return [key for bit, key in ERROR_CODES.items() if bit and code & bit]
+
     @property
     def native_value(self) -> str:
         error_code = self.coordinator.data.get("error_code")
         if error_code is None:
             return "unknown"
-        return ERROR_CODES.get(int(error_code), "unknown")
+        if int(error_code) == 0:
+            return ERROR_CODES[0]
+        active = self._active_errors()
+        return active[0] if active else "unknown"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        error_code = self.coordinator.data.get("error_code")
+        if error_code is None:
+            return {}
+        code = int(error_code)
+        attrs: dict[str, object] = {
+            "raw_code": code,
+            "active_errors": self._active_errors(),
+        }
+        known_mask = 0
+        for bit in ERROR_CODES:
+            known_mask |= bit
+        if code & ~known_mask:
+            attrs["unknown_bits"] = hex(code & ~known_mask)
+        return attrs
 
 
 class AbbTerraAcSocketLockStateSensor(AbbTerraAcBaseSensor):

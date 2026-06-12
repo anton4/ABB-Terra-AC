@@ -29,6 +29,23 @@
       "reconfigure_successful": "Ponovna nastavitev je uspela"
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Možnosti ABB Terra AC",
+        "description": "Nastavitve delovanja (identiteta in povezava se spremenita prek ponovne nastavitve).",
+        "data": {
+          "scan_interval": "Interval osveževanja"
+        },
+        "data_description": {
+          "scan_interval": "Kako pogosto Home Assistant bere registre polnilnice, v sekundah (5–300). Mora biti krajši od časovne omejitve Modbus komunikacije polnilnice (trenutno {communication_timeout} s), sicer polnilnica šteje povezavo za izgubljeno."
+        }
+      }
+    },
+    "error": {
+      "scan_interval_exceeds_timeout": "Interval osveževanja mora biti krajši od časovne omejitve Modbus komunikacije polnilnice ({communication_timeout} s). Počasnejše osveževanje povzroči, da polnilnica zazna izgubo komunikacije ter ustavi ali omeji polnjenje."
+    }
+  },
   "entity": {
     "sensor": {
       "charging_state": {

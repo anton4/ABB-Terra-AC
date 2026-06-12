@@ -297,3 +297,33 @@ async def test_options_flow_updates_scan_interval(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_SCAN_INTERVAL] == 45
+
+
+async def test_options_flow_rejects_scan_interval_above_charger_timeout(
+    hass: HomeAssistant,
+) -> None:
+    """Intervals not shorter than the charger's communication timeout are rejected."""
+    from types import SimpleNamespace
+
+    entry = MockConfigEntry(**mock_config_entry_kwargs())
+    entry.add_to_hass(hass)
+    entry.runtime_data = SimpleNamespace(
+        coordinator=SimpleNamespace(data={"communication_timeout": 60})
+    )
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] is FlowResultType.FORM
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 60},
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_SCAN_INTERVAL: "scan_interval_exceeds_timeout"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        user_input={CONF_SCAN_INTERVAL: 45},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_SCAN_INTERVAL] == 45

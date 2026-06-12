@@ -20,6 +20,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    HARD_MAX_CURRENT_A,
     MODBUS_READ_TIMEOUT,
     PLATFORMS,
     AbbTerraAcData,
@@ -206,12 +207,13 @@ class AbbTerraAcDataUpdateCoordinator(DataUpdateCoordinator[AbbTerraAcData]):
             data["error_code"] = int(self._decode_32bit_value(registers[8:10]))
             data["socket_lock_state"] = int(self._decode_32bit_value(registers[10:12]))
 
-            # Charging state: per testing, actual state is in register 400Dh (index 13),
-            # encoded in the high byte. Documentation states 400Ch but it always returns 0.
-            # Bit 7 of high byte = charging at reduced current.
+            # Charging state (400Ch, 32-bit big-endian): the manual places the
+            # IEC 61851-1 state in byte 1 (bits 6-0) and the reduced-current
+            # flag in bit 7 of the same byte. Byte 1 is the high byte of the
+            # low word, i.e. registers[13]; the high word (registers[12]) is spare.
             charging_state_register = registers[13]
             high_byte = (charging_state_register >> 8) & 0xFF
-            state_code = high_byte & 0x0F
+            state_code = high_byte & 0x7F
             data["charging_state"] = state_code
             data["charging_at_reduced_current"] = bool(high_byte & 0x80)
 
@@ -229,27 +231,32 @@ class AbbTerraAcDataUpdateCoordinator(DataUpdateCoordinator[AbbTerraAcData]):
             data["fallback_limit"] = registers[36]
 
             # --- Firmware bug fix: Fallback Limit ---
-            # Known firmware bug: fallback limit resets to 256 after unexpected reboot.
-            # Restore to last known valid value, or user_settable_max_current as fallback.
+            # Known firmware bug: fallback limit resets to 255/256 after unexpected reboot.
+            # Restore to last known valid value, or the validity bound as fallback.
+            # The bound is capped at the hardware maximum so a simultaneously
+            # glitched user_settable_max_current cannot legitimize a bogus limit.
             fallback_limit = data["fallback_limit"]
             user_max = int(data["user_settable_max_current"])
+            max_valid = (
+                min(user_max, HARD_MAX_CURRENT_A) if user_max > 0 else HARD_MAX_CURRENT_A
+            )
 
-            if fallback_limit <= user_max or fallback_limit == 0:
+            if fallback_limit <= max_valid:
                 self._last_valid_fallback_limit = fallback_limit
                 self._fallback_fix_attempted = False
                 self._async_delete_limit_issue(_ISSUE_ID_INVALID_FALLBACK_LIMIT)
-            elif fallback_limit > user_max:
+            else:
                 # Suppress spurious 255A readings when the EV is not connected
                 if fallback_limit == 255 and data["socket_lock_state"] == 0:
-                    data["fallback_limit"] = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else user_max
+                    data["fallback_limit"] = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else max_valid
                 else:
                     _LOGGER.warning(
                         "Invalid fallback limit detected: %sA (max allowed: %sA). Attempting to restore.",
-                        fallback_limit, user_max
+                        fallback_limit, max_valid
                     )
                     if not self._fallback_fix_attempted:
                         self._fallback_fix_attempted = True
-                    restore_value = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else user_max
+                    restore_value = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else max_valid
                     try:
                         await async_write_register(
                             self.client,
@@ -266,26 +273,26 @@ class AbbTerraAcDataUpdateCoordinator(DataUpdateCoordinator[AbbTerraAcData]):
                             _ISSUE_ID_INVALID_FALLBACK_LIMIT,
                             "fallback limit",
                             fallback_limit,
-                            user_max,
+                            max_valid,
                         )
 
             # --- Firmware bug fix: Charging Current Limit ---
             # Known firmware bug: charging current limit resets to 32A after unexpected reboot.
-            # Restore to last known valid value, or user_settable_max_current as fallback.
+            # Restore to last known valid value, or the validity bound as fallback.
             current_limit = int(data["charging_current_limit_modbus"])
 
-            if user_max > 0 and current_limit <= user_max:
+            if user_max > 0 and current_limit <= max_valid:
                 self._last_valid_current_limit = current_limit
                 self._current_limit_fix_attempted = False
                 self._async_delete_limit_issue(_ISSUE_ID_INVALID_CURRENT_LIMIT)
-            elif user_max > 0 and current_limit > user_max:
+            elif user_max > 0 and current_limit > max_valid:
                 _LOGGER.warning(
                     "Invalid charging current limit detected: %sA (max allowed: %sA). Attempting to restore.",
-                    current_limit, user_max
+                    current_limit, max_valid
                 )
                 if not self._current_limit_fix_attempted:
                     self._current_limit_fix_attempted = True
-                    restore_value = self._last_valid_current_limit if self._last_valid_current_limit is not None else user_max
+                    restore_value = self._last_valid_current_limit if self._last_valid_current_limit is not None else max_valid
                     value_to_send = int(restore_value * 1000)
                     high_word = value_to_send >> 16
                     low_word = value_to_send & 0xFFFF
@@ -305,7 +312,7 @@ class AbbTerraAcDataUpdateCoordinator(DataUpdateCoordinator[AbbTerraAcData]):
                             _ISSUE_ID_INVALID_CURRENT_LIMIT,
                             "charging current limit",
                             current_limit,
-                            user_max,
+                            max_valid,
                         )
 
             if not self._is_available:

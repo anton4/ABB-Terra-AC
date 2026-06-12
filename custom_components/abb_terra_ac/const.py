@@ -19,6 +19,11 @@ MAX_SCAN_INTERVAL: Final = 300
 MODBUS_CONNECT_TIMEOUT: Final = 5.0
 MODBUS_READ_TIMEOUT: Final = 3.0
 
+# Absolute hardware maximum of the Terra AC line. Bounds the firmware-bug
+# restore logic even when user_settable_max_current itself reads a glitched
+# value (e.g. during the 255 A fallback-limit firmware bug).
+HARD_MAX_CURRENT_A: Final = 32
+
 PLATFORMS: Final[list[Platform]] = [
     Platform.SENSOR,
     Platform.SWITCH,
@@ -74,7 +79,9 @@ SOCKET_LOCK_STATES: Final[dict[int, str]] = {
     273: "cable_ev_connected_locked",
 }
 
-# Error codes (enum values = translation keys under entity.sensor.error_code.state)
+# Error codes (enum values = translation keys under entity.sensor.error_code.state).
+# The register is a bitmask: each non-zero key is a single error bit and several
+# may be set at once. Key 0 is the special "no error" value.
 ERROR_CODES: Final[dict[int, str]] = {
     0: "no_error",
     2: "residual_current_detected",

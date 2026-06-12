@@ -573,3 +573,29 @@ async def test_session_state_paused_by_command_after_stop_and_state_five(
 
     session_id = _entity_id_for(hass, entry.entry_id, "session_state")
     assert hass.states.get(session_id).state == "paused_by_command"
+
+
+async def test_error_code_sensor_decodes_bitmask(hass: HomeAssistant) -> None:
+    """Combined error bits show the first active error plus all flags as attributes."""
+    # over_voltage (8) + missing_phase (8192) set simultaneously
+    registers = make_holding_registers_37(error_code=8 | 8192)
+    entry, _ = await _async_setup_with_registers(hass, registers)
+
+    err_id = _entity_id_for(hass, entry.entry_id, "error_code")
+    state = hass.states.get(err_id)
+    assert state.state == ERROR_CODES[8]
+    assert state.attributes["raw_code"] == 8 | 8192
+    assert state.attributes["active_errors"] == [ERROR_CODES[8], ERROR_CODES[8192]]
+    assert "unknown_bits" not in state.attributes
+
+
+async def test_error_code_sensor_reports_unknown_bits(hass: HomeAssistant) -> None:
+    """Bits outside the documented map surface via the unknown_bits attribute."""
+    registers = make_holding_registers_37(error_code=(1 << 20) | 16)
+    entry, _ = await _async_setup_with_registers(hass, registers)
+
+    err_id = _entity_id_for(hass, entry.entry_id, "error_code")
+    state = hass.states.get(err_id)
+    assert state.state == ERROR_CODES[16]
+    assert state.attributes["active_errors"] == [ERROR_CODES[16]]
+    assert state.attributes["unknown_bits"] == hex(1 << 20)
