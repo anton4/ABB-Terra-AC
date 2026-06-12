@@ -239,12 +239,16 @@ class AbbTerraAcDataUpdateCoordinator(DataUpdateCoordinator[AbbTerraAcData]):
                 self._fallback_fix_attempted = False
                 self._async_delete_limit_issue(_ISSUE_ID_INVALID_FALLBACK_LIMIT)
             elif fallback_limit > user_max:
-                _LOGGER.warning(
-                    "Invalid fallback limit detected: %sA (max allowed: %sA). Attempting to restore.",
-                    fallback_limit, user_max
-                )
-                if not self._fallback_fix_attempted:
-                    self._fallback_fix_attempted = True
+                # Suppress spurious 255A readings when the EV is not connected
+                if fallback_limit == 255 and data["socket_lock_state"] == 0:
+                    data["fallback_limit"] = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else user_max
+                else:
+                    _LOGGER.warning(
+                        "Invalid fallback limit detected: %sA (max allowed: %sA). Attempting to restore.",
+                        fallback_limit, user_max
+                    )
+                    if not self._fallback_fix_attempted:
+                        self._fallback_fix_attempted = True
                     restore_value = self._last_valid_fallback_limit if self._last_valid_fallback_limit is not None else user_max
                     try:
                         await async_write_register(
